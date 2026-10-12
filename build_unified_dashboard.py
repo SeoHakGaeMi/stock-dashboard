@@ -659,7 +659,12 @@ def render_unified_html(summary_list):
             position: relative;
             width: 100%;
             height: 380px;
-            max-height: 400px;
+            max-height: 380px;
+            overflow: hidden;
+        }}
+        .chart-canvas-wrapper canvas {{
+            max-height: 380px !important;
+            height: 380px !important;
         }}
         .chart-top {{
             display: flex;
