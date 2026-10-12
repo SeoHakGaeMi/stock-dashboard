@@ -655,6 +655,12 @@ def render_unified_html(summary_list):
 
         /* 차트 박스 */
         .chart-box {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; position: relative; }}
+        .chart-canvas-wrapper {{
+            position: relative;
+            width: 100%;
+            height: 380px;
+            max-height: 400px;
+        }}
         .chart-top {{
             display: flex;
             justify-content: space-between;
@@ -856,7 +862,9 @@ def render_unified_html(summary_list):
 
             <div class="legend-box" id="legendBox"></div>
         </div>
-        <canvas id="mainCanvas" height="85"></canvas>
+        <div class="chart-canvas-wrapper">
+            <canvas id="mainCanvas"></canvas>
+        </div>
     </div>
 
     <!-- 하단 일주일 뉴스 타임라인 섹션 -->
@@ -1193,6 +1201,7 @@ def render_unified_html(summary_list):
                         }},
                         y: {{
                             grid: {{ color: '#1E293B' }},
+                            max: 0,
                             ticks: {{
                                 color: '#8E9BAE',
                                 callback: function(val) {{ return val + '%'; }}
