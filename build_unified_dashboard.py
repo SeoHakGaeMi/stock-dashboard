@@ -320,7 +320,7 @@ def process_single_stock(item, d10_cutoff, d20_cutoff):
 
 def build_unified_system():
     print("==========================================")
-    print(f"🚀 S&P 100 + 국내 반도체 ({len(ALL_STOCKS)}개 종목) 통합 대시보드 구축")
+    print(f"🚀 S&P 100 + 국내 반도체 ({len(ALL_STOCKS)}개 종목) 통합 대시보드 구축 (Method A 분할 아키텍처)")
     print("==========================================\n")
 
     now = datetime.datetime.now()
@@ -351,16 +351,65 @@ def build_unified_system():
             except Exception as e:
                 print(f"[{completed:03d}/{total:03d}] ⚠️ {item['sym']} 오류: {e}")
 
-    os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+    data_dir = os.path.join(BASE_DIR, "data")
+    stocks_dir = os.path.join(data_dir, "stocks")
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(stocks_dir, exist_ok=True)
     os.makedirs(os.path.join(BASE_DIR, "reports"), exist_ok=True)
 
+    # 1. 원본 통합 데이터 저장 (호환성 백업)
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(stock_data_map, f, ensure_ascii=False)
 
-    render_unified_html(stock_data_map)
+    # 2. Method A: 종목별 개별 JSON 분할 및 경량 요약본(Summary) 생성
+    summary_list = []
+    for sym, d in stock_data_map.items():
+        # 종목별 개별 상세 파일 저장 (On-Demand Fetching 대상)
+        stock_path = os.path.join(stocks_dir, f"{sym}.json")
+        with open(stock_path, "w", encoding="utf-8") as sf:
+            json.dump(d, sf, ensure_ascii=False)
 
-def render_unified_html(stock_data_map):
+        p10 = d.get("p10", {})
+        p20 = d.get("p20", {})
+        r10 = round(abs(p10.get("current_dd", 0)) / abs(p10.get("avg_mdd", 1)) * 100, 1) if p10.get("avg_mdd") else 0
+        r20 = round(abs(p20.get("current_dd", 0)) / abs(p20.get("avg_mdd", 1)) * 100, 1) if p20.get("avg_mdd") else 0
+
+        summary_item = {
+            "sym": sym,
+            "name": d.get("name", sym),
+            "sector": d.get("sector", ""),
+            "is_kr": d.get("is_kr", False),
+            "currency": d.get("currency", "$"),
+            "p10": {
+                "current_price": p10.get("current_price", 0),
+                "current_dd": p10.get("current_dd", 0),
+                "avg_mdd": p10.get("avg_mdd", 0),
+                "worst_mdd": p10.get("worst_mdd", 0),
+                "ratio": r10
+            },
+            "p20": {
+                "current_price": p20.get("current_price", 0),
+                "current_dd": p20.get("current_dd", 0),
+                "avg_mdd": p20.get("avg_mdd", 0),
+                "worst_mdd": p20.get("worst_mdd", 0),
+                "ratio": r20
+            }
+        }
+        summary_list.append(summary_item)
+
+    summary_path = os.path.join(data_dir, "stock_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as sf:
+        json.dump(summary_list, sf, ensure_ascii=False)
+
+    print(f"\n✓ Method A: {len(stock_data_map)}개 종목 분할 JSON 생성 완료 (저장 경로: data/stocks/)")
+    print(f"✓ 경량 요약본 생성 완료: {summary_path} ({round(os.path.getsize(summary_path)/1024, 1)} KB)")
+
+    render_unified_html(summary_list)
+
+def render_unified_html(summary_list):
     cat_b64 = get_cat_base64()
+    summary_json_str = json.dumps(summary_list, ensure_ascii=False)
+
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -572,6 +621,31 @@ def render_unified_html(stock_data_map):
         }}
         .btn-toggle.active {{ background: #0284C7; color: #FFF; }}
 
+        /* 바닥권 / 패닉 알림 배너 (고양이 짤 연동) */
+        .cat-alert-banner {{
+            display: none;
+            align-items: center;
+            gap: 16px;
+            background: linear-gradient(90deg, rgba(239, 68, 68, 0.22), rgba(245, 158, 11, 0.1));
+            border: 1px solid rgba(239, 68, 68, 0.6);
+            border-radius: 12px;
+            padding: 12px 18px;
+            margin-bottom: 20px;
+            animation: fadeIn 0.25s ease-in-out;
+        }}
+        .cat-alert-img {{
+            width: 52px;
+            height: 52px;
+            border-radius: 10px;
+            object-fit: cover;
+            border: 2px solid rgba(239, 68, 68, 0.6);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+            flex-shrink: 0;
+        }}
+        .cat-alert-content {{ display: flex; flex-direction: column; }}
+        .cat-alert-title {{ font-size: 14px; font-weight: 800; color: #F87171; display: flex; align-items: center; gap: 6px; }}
+        .cat-alert-desc {{ font-size: 12px; color: var(--text-main); margin-top: 3px; line-height: 1.4; }}
+
         /* 4대 지표 카드 */
         .stats-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }}
         .stat-card {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }}
@@ -729,11 +803,11 @@ def render_unified_html(stock_data_map):
         </div>
     </div>
 
-    <!-- 바닥권 / 패닉 알림 배너 (고양이 짤 연동) -->
+    <!-- 바닥권 / 패닉 알림 배너 (고양이 짤 연동 - MDD 바닥권 종목에만 조건부 노출) -->
     <div id="catAlertBanner" class="cat-alert-banner">
         <img src="data:image/jpeg;base64,{cat_b64}" class="cat-alert-img" alt="Panic Cat">
         <div class="cat-alert-content">
-            <div class="cat-alert-title" id="catAlertTitle">🙀 으아악! 역사적 바닥권 도달!</div>
+            <div class="cat-alert-title" id="catAlertTitle">🙀 으아악! 역사적 평균 MDD 바닥권 도달!</div>
             <div class="cat-alert-desc" id="catAlertDesc">현재 고점 대비 낙폭이 과거 평균 MDD 수준에 도달하여 패닉 매수 관점을 점검할 구간입니다.</div>
         </div>
     </div>
@@ -795,12 +869,17 @@ def render_unified_html(stock_data_map):
 </div>
 
 <script>
-    const dataMap = {json.dumps(stock_data_map, ensure_ascii=False)};
+    // Method A: 초경량 요약본 인메모리 탑재 (초기 로딩 0.05초)
+    const summaryList = {summary_json_str};
+    const summaryMap = {{}};
+    summaryList.forEach(item => {{ summaryMap[item.sym] = item; }});
+
     let activeSym = "NVDA";
     let activePeriod = "p10";
     let activeChartType = "MDD";
     let currentFilter = "ALL";
     let chartInstance = null;
+    const stockCache = {{}}; // 개별 종목 상세 데이터 비동기 캐시
 
     function renderLogo(sym, is_kr, isBig) {{
         const cls = isBig ? "big-logo" : "item-logo";
@@ -808,18 +887,18 @@ def render_unified_html(stock_data_map):
         const shortTxt = sym.replace(".KS", "").replace(".KQ", "").slice(0, 3);
 
         if (is_kr) {{
-            return `<img class="${{cls}}" src="https://ssl.pstatic.net/imgfinance/chart/mobile/mini/${{sym}}_small.png" onerror="this.outerHTML='<div class=\\'${{avatarCls}}\\'>${{shortTxt}}</div>'">`;
+            return `<img class="${{cls}}" src="https://ssl.pstatic.net/imgfinance/chart/mobile/mini/${{sym}}_small.png" onerror="this.outerHTML='<div class=\'${{avatarCls}}\'>${{shortTxt}}</div>'">`;
         }}
         const cleanSym = sym.replace("-B", ".B");
-        return `<img class="${{cls}}" src="https://assets.parqet.com/logos/symbol/${{cleanSym}}?format=png" onerror="this.outerHTML='<div class=\\'${{avatarCls}}\\'>${{shortTxt}}</div>'">`;
+        return `<img class="${{cls}}" src="https://assets.parqet.com/logos/symbol/${{cleanSym}}?format=png" onerror="this.outerHTML='<div class=\'${{avatarCls}}\'>${{shortTxt}}</div>'">`;
     }}
 
     function updateCounts() {{
         let all = 0, bottom = 0, correct = 0, safe = 0;
-        Object.keys(dataMap).forEach(sym => {{
+        summaryList.forEach(item => {{
             all++;
-            const p = dataMap[sym].p10;
-            const ratio = (Math.abs(p.current_dd) / Math.abs(p.avg_mdd)) * 100;
+            const p = item[activePeriod] || {{ ratio: 0 }};
+            const ratio = p.ratio;
             if (ratio >= 90) bottom++;
             else if (ratio >= 60) correct++;
             else safe++;
@@ -836,18 +915,16 @@ def render_unified_html(stock_data_map):
         listEl.innerHTML = "";
         const query = document.getElementById("searchInput").value.trim().toLowerCase();
 
-        const sortedSyms = Object.keys(dataMap).sort((a, b) => {{
-            const pA = dataMap[a][activePeriod];
-            const pB = dataMap[b][activePeriod];
-            const rA = Math.abs(pA.current_dd) / Math.abs(pA.avg_mdd);
-            const rB = Math.abs(pB.current_dd) / Math.abs(pB.avg_mdd);
-            return rB - rA;
+        const sortedList = [...summaryList].sort((a, b) => {{
+            const pA = a[activePeriod] || {{ ratio: 0 }};
+            const pB = b[activePeriod] || {{ ratio: 0 }};
+            return pB.ratio - pA.ratio;
         }});
 
-        sortedSyms.forEach(sym => {{
-            const item = dataMap[sym];
-            const p = item[activePeriod];
-            const ratio = (Math.abs(p.current_dd) / Math.abs(p.avg_mdd)) * 100;
+        sortedList.forEach(item => {{
+            const sym = item.sym;
+            const p = item[activePeriod] || {{ current_dd: 0, avg_mdd: 0, ratio: 0 }};
+            const ratio = p.ratio;
 
             if (query && !sym.toLowerCase().includes(query) && !item.name.toLowerCase().includes(query)) return;
             if (currentFilter === "BOTTOM" && ratio < 90) return;
@@ -894,28 +971,96 @@ def render_unified_html(stock_data_map):
         activePeriod = p;
         document.getElementById("btn10y").className = `btn-toggle ${{p === 'p10' ? 'active' : ''}}`;
         document.getElementById("btn20y").className = `btn-toggle ${{p === 'p20' ? 'active' : ''}}`;
-        const periodTxt = p === 'p10' ? "10년" : "20년";
-        document.getElementById("labelAvg").innerText = `${{periodTxt}} 고유 평균 MDD`;
-        document.getElementById("labelWorst").innerText = `${{periodTxt}} 역사적 최대 MDD`;
+        document.getElementById("labelAvg").innerText = p === 'p10' ? "10년 고유 평균 MDD" : "20년 고유 평균 MDD";
+        document.getElementById("labelWorst").innerText = p === 'p10' ? "10년 역사적 최대 MDD" : "20년 역사적 최대 MDD";
+        updateCounts();
         renderSidebar();
-        updateMainDetail();
+        if (stockCache[activeSym]) {{
+            renderDetail(stockCache[activeSym]);
+        }} else {{
+            loadAndRenderDetail(activeSym);
+        }}
     }}
 
     function setChartType(type) {{
         activeChartType = type;
         document.getElementById("btnChartMDD").className = `btn-toggle ${{type === 'MDD' ? 'active' : ''}}`;
         document.getElementById("btnChartPrice").className = `btn-toggle ${{type === 'PRICE' ? 'active' : ''}}`;
-        updateMainDetail();
+        if (stockCache[activeSym]) {{
+            renderChart(stockCache[activeSym], stockCache[activeSym][activePeriod]);
+        }}
     }}
 
     function selectStock(sym) {{
         activeSym = sym;
         renderSidebar();
-        updateMainDetail();
+        loadAndRenderDetail(sym);
     }}
 
-    function updateMainDetail() {{
-        const stock = dataMap[activeSym];
+    function loadAndRenderDetail(sym) {{
+        if (stockCache[sym]) {{
+            renderDetail(stockCache[sym]);
+            return;
+        }}
+
+        const s = summaryMap[sym] || {{}};
+        const curSym = s.currency || "$";
+        const p = s[activePeriod] || {{ current_price: 0, current_dd: 0, avg_mdd: 0, worst_mdd: 0, ratio: 0 }};
+
+        document.getElementById("mainLogoContainer").innerHTML = renderLogo(sym, s.is_kr, true);
+        document.getElementById("mainTitle").innerText = `${{s.name || sym}} (${{sym}})`;
+        document.getElementById("mainMeta").innerText = `${{s.sector || ""}} · 현재가: ${{curSym}}${{Number(p.current_price || 0).toLocaleString()}} (상세 데이터 불러오는 중...)`;
+
+        document.getElementById("statCurDD").innerText = p.current_dd + "%";
+        document.getElementById("statPrice").innerText = `현재가: ${{curSym}}${{Number(p.current_price || 0).toLocaleString()}}`;
+        document.getElementById("statAvgMDD").innerText = p.avg_mdd + "%";
+        document.getElementById("statAvgDesc").innerText = "과거 조정 평균 바닥선";
+        document.getElementById("statWorstMDD").innerText = p.worst_mdd + "%";
+
+        const rEl = document.getElementById("statRatio");
+        rEl.innerText = p.ratio.toFixed(1) + "%";
+        const stEl = document.getElementById("statStatus");
+        const catBanner = document.getElementById("catAlertBanner");
+
+        if (p.ratio >= 90) {{
+            rEl.style.color = "#22C55E";
+            stEl.innerText = "🚨 역사적 평균 바닥권 도달 (매수 관심)";
+            if (catBanner) {{
+                catBanner.style.display = "flex";
+                document.getElementById("catAlertTitle").innerText = `🙀 으아악! 역사적 평균 MDD 바닥권 도달! (평균 MDD 도달률 ${{p.ratio.toFixed(1)}}%)`;
+                document.getElementById("catAlertDesc").innerText = `현재 고점 대비 낙폭(${{p.current_dd}}%)이 과거 평균 MDD(${{p.avg_mdd}}%)의 90% 이상 도달했습니다. 역사적 분할 매수 찬스 구간인지 점검해보세요!`;
+            }}
+        }} else if (p.ratio >= 60) {{
+            rEl.style.color = "#F59E0B";
+            stEl.innerText = "⚠️ 평균 조정선 접근 중 (60%+ 진행)";
+            if (catBanner) catBanner.style.display = "none";
+        }} else {{
+            rEl.style.color = "#38BDF8";
+            stEl.innerText = "🟢 정상 / 상승 추세권";
+            if (catBanner) catBanner.style.display = "none";
+        }}
+
+        document.getElementById("chartTitle").innerText = `⏳ ${{s.name || sym}} 상세 차트 로딩 중...`;
+
+        // Method A: 개별 종목 JSON을 비동기로 로드
+        fetch(`./data/stocks/${{sym}}.json`)
+            .then(res => {{
+                if (!res.ok) throw new Error("데이터를 불러오지 못했습니다 (HTTP " + res.status + ")");
+                return res.json();
+            }})
+            .then(data => {{
+                stockCache[sym] = data;
+                if (activeSym === sym) {{
+                    renderDetail(data);
+                }}
+            }})
+            .catch(err => {{
+                console.error("상세 데이터 로드 실패:", err);
+                document.getElementById("chartTitle").innerText = `⚠️ ${{s.name || sym}} 차트 데이터를 불러올 수 없습니다.`;
+            }});
+    }}
+
+    function renderDetail(stock) {{
         if (!stock) return;
         const p = stock[activePeriod];
         if (!p) return;
@@ -948,15 +1093,11 @@ def render_unified_html(stock_data_map):
         }} else if (ratio >= 60) {{
             rEl.style.color = "#F59E0B";
             stEl.innerText = "⚠️ 평균 조정선 접근 중 (60%+ 진행)";
-            if (catBanner) {{
-                catBanner.style.display = "none";
-            }}
+            if (catBanner) catBanner.style.display = "none";
         }} else {{
             rEl.style.color = "#38BDF8";
             stEl.innerText = "🟢 정상 / 상승 추세권";
-            if (catBanner) {{
-                catBanner.style.display = "none";
-            }}
+            if (catBanner) catBanner.style.display = "none";
         }}
 
         renderChart(stock, p);
@@ -973,16 +1114,11 @@ def render_unified_html(stock_data_map):
         if (activeChartType === "MDD") {{
             document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] MDD 낙폭 차트 (마우스 휠/드래그 확대 지원)`;
             legendBox.innerHTML = `
-                <div class="legend-item"><span class="line-swatch" style="background: var(--red);"></span> 낙폭 곡선</div>
-                <div class="legend-item"><span class="line-swatch" style="background: var(--gold); border-top: 1px dashed;"></span> 평균 MDD (${{p.avg_mdd}}%)</div>
-                <div class="legend-item"><span class="line-swatch" style="background: var(--purple); border-top: 1px dashed;"></span> 최대 MDD (${{p.worst_mdd}}%)</div>
-                <div class="legend-item"><span class="line-swatch" style="background: var(--blue);"></span> 현재 낙폭 (${{p.current_dd}}%)</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#EF4444;"></div> 낙폭 곡선</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#F59E0B;"></div> 평균 MDD (${{p.avg_mdd}}%)</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#A78BFA;"></div> 최대 MDD (${{p.worst_mdd}}%)</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#38BDF8;"></div> 현재 낙폭 (${{p.current_dd}}%)</div>
             `;
-
-            const n = p.dates.length;
-            const avgLine = new Array(n).fill(p.avg_mdd);
-            const worstLine = new Array(n).fill(p.worst_mdd);
-            const curLine = new Array(n).fill(p.current_dd);
 
             chartInstance = new Chart(ctx, {{
                 type: 'line',
@@ -990,38 +1126,39 @@ def render_unified_html(stock_data_map):
                     labels: p.dates,
                     datasets: [
                         {{
-                            label: 'Drawdown (%)',
+                            label: 'MDD 낙폭 (%)',
                             data: p.drawdowns,
                             borderColor: '#EF4444',
-                            backgroundColor: 'rgba(239, 68, 68, 0.35)',
-                            fill: 'start',
                             borderWidth: 1.5,
+                            fill: true,
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
                             pointRadius: 0,
                             tension: 0.1
                         }},
                         {{
-                            label: `평균 MDD (${{p.avg_mdd}}%)`,
-                            data: avgLine,
+                            label: '평균 MDD',
+                            data: Array(p.dates.length).fill(p.avg_mdd),
                             borderColor: '#F59E0B',
-                            borderWidth: 2,
+                            borderWidth: 1.5,
                             borderDash: [5, 4],
                             pointRadius: 0,
                             fill: false
                         }},
                         {{
-                            label: `최대 MDD (${{p.worst_mdd}}%)`,
-                            data: worstLine,
-                            borderColor: '#8B5CF6',
+                            label: '최대 MDD',
+                            data: Array(p.dates.length).fill(p.worst_mdd),
+                            borderColor: '#A78BFA',
                             borderWidth: 1.5,
-                            borderDash: [3, 3],
+                            borderDash: [2, 3],
                             pointRadius: 0,
                             fill: false
                         }},
                         {{
-                            label: `현재 낙폭 (${{p.current_dd}}%)`,
-                            data: curLine,
+                            label: '현재 낙폭',
+                            data: Array(p.dates.length).fill(p.current_dd),
                             borderColor: '#38BDF8',
-                            borderWidth: 2,
+                            borderWidth: 1.2,
+                            borderDash: [4, 4],
                             pointRadius: 0,
                             fill: false
                         }}
@@ -1029,38 +1166,50 @@ def render_unified_html(stock_data_map):
                 }},
                 options: {{
                     responsive: true,
-                    animation: false,
-                    scales: {{
-                        y: {{
-                            grid: {{ color: 'rgba(35, 45, 66, 0.5)' }},
-                            ticks: {{ color: '#8E9BAE', callback: v => v + '%' }},
-                            suggestedMin: Math.min(p.worst_mdd * 1.05, -50),
-                            suggestedMax: 0
-                        }},
-                        x: {{
-                            grid: {{ display: false }},
-                            ticks: {{ color: '#8E9BAE', maxTicksLimit: 12 }}
-                        }}
-                    }},
+                    maintainAspectRatio: false,
+                    interaction: {{ mode: 'index', intersect: false }},
                     plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    return context.dataset.label + ': ' + context.parsed.y + '%';
+                                }}
+                            }}
+                        }},
                         zoom: {{
                             pan: {{ enabled: true, mode: 'x' }},
-                            zoom: {{ wheel: {{ enabled: true }}, pinch: {{ enabled: true }}, mode: 'x' }}
+                            zoom: {{
+                                wheel: {{ enabled: true }},
+                                pinch: {{ enabled: true }},
+                                mode: 'x'
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            grid: {{ color: '#1E293B' }},
+                            ticks: {{ color: '#8E9BAE', maxTicksLimit: 10 }}
                         }},
-                        tooltip: {{
-                            callbacks: {{ label: ctx => `${{ctx.dataset.label}}: ${{ctx.raw}}%` }}
+                        y: {{
+                            grid: {{ color: '#1E293B' }},
+                            ticks: {{
+                                color: '#8E9BAE',
+                                callback: function(val) {{ return val + '%'; }}
+                            }}
                         }}
                     }}
                 }}
             }});
         }} else {{
-            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] 일반 주가 & 이동평균선 차트 (마우스 휠/드래그 확대 지원)`;
+            const curSym = stock.currency;
+            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] 주가 및 주요 이동평균선 (마우스 휠/드래그 확대 지원)`;
             legendBox.innerHTML = `
-                <div class="legend-item"><span class="line-swatch" style="background: #38BDF8;"></span> 주가 (종가)</div>
-                <div class="legend-item"><span class="line-swatch" style="background: #FBBF24;"></span> 20일선</div>
-                <div class="legend-item"><span class="line-swatch" style="background: #FB923C;"></span> 50일선</div>
-                <div class="legend-item"><span class="line-swatch" style="background: #A78BFA;"></span> 100일선</div>
-                <div class="legend-item"><span class="line-swatch" style="background: #EF4444;"></span> 200일선</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#38BDF8;"></div> 종가 (${{curSym}})</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#22C55E;"></div> 20일선</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#F59E0B;"></div> 50일선</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#FB923C;"></div> 100일선</div>
+                <div class="legend-item"><div class="line-swatch" style="background:#A78BFA;"></div> 200일선</div>
             `;
 
             chartInstance = new Chart(ctx, {{
@@ -1072,14 +1221,16 @@ def render_unified_html(stock_data_map):
                             label: '종가',
                             data: p.closes,
                             borderColor: '#38BDF8',
-                            borderWidth: 2,
+                            borderWidth: 1.8,
+                            fill: true,
+                            backgroundColor: 'rgba(56, 189, 248, 0.08)',
                             pointRadius: 0,
-                            fill: false
+                            tension: 0.1
                         }},
                         {{
                             label: '20일선',
                             data: p.ma20,
-                            borderColor: '#FBBF24',
+                            borderColor: '#22C55E',
                             borderWidth: 1.2,
                             pointRadius: 0,
                             fill: false
@@ -1087,7 +1238,7 @@ def render_unified_html(stock_data_map):
                         {{
                             label: '50일선',
                             data: p.ma50,
-                            borderColor: '#FB923C',
+                            borderColor: '#F59E0B',
                             borderWidth: 1.2,
                             pointRadius: 0,
                             fill: false
@@ -1095,7 +1246,7 @@ def render_unified_html(stock_data_map):
                         {{
                             label: '100일선',
                             data: p.ma100,
-                            borderColor: '#A78BFA',
+                            borderColor: '#FB923C',
                             borderWidth: 1.2,
                             pointRadius: 0,
                             fill: false
@@ -1103,7 +1254,7 @@ def render_unified_html(stock_data_map):
                         {{
                             label: '200일선',
                             data: p.ma200,
-                            borderColor: '#EF4444',
+                            borderColor: '#A78BFA',
                             borderWidth: 1.5,
                             pointRadius: 0,
                             fill: false
@@ -1112,21 +1263,37 @@ def render_unified_html(stock_data_map):
                 }},
                 options: {{
                     responsive: true,
-                    animation: false,
-                    scales: {{
-                        y: {{
-                            grid: {{ color: 'rgba(35, 45, 66, 0.5)' }},
-                            ticks: {{ color: '#8E9BAE', callback: v => stock.currency + v.toLocaleString() }}
-                        }},
-                        x: {{
-                            grid: {{ display: false }},
-                            ticks: {{ color: '#8E9BAE', maxTicksLimit: 12 }}
-                        }}
-                    }},
+                    maintainAspectRatio: false,
+                    interaction: {{ mode: 'index', intersect: false }},
                     plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    return context.dataset.label + ': ' + curSym + context.parsed.y.toLocaleString();
+                                }}
+                            }}
+                        }},
                         zoom: {{
                             pan: {{ enabled: true, mode: 'x' }},
-                            zoom: {{ wheel: {{ enabled: true }}, pinch: {{ enabled: true }}, mode: 'x' }}
+                            zoom: {{
+                                wheel: {{ enabled: true }},
+                                pinch: {{ enabled: true }},
+                                mode: 'x'
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            grid: {{ color: '#1E293B' }},
+                            ticks: {{ color: '#8E9BAE', maxTicksLimit: 10 }}
+                        }},
+                        y: {{
+                            grid: {{ color: '#1E293B' }},
+                            ticks: {{
+                                color: '#8E9BAE',
+                                callback: function(val) {{ return curSym + val.toLocaleString(); }}
+                            }}
                         }}
                     }}
                 }}
@@ -1136,26 +1303,26 @@ def render_unified_html(stock_data_map):
 
     function zoomPreset(range) {{
         if (!chartInstance) return;
-        const stock = dataMap[activeSym];
-        if (!stock) return;
-        const p = stock[activePeriod];
-        const dates = p.dates;
-        const len = dates.length;
-        if (len === 0) return;
+        const total = chartInstance.data.labels.length;
+        if (total === 0) return;
 
-        let startIndex = 0;
-        if (range === '3M') startIndex = Math.max(0, len - 65);
-        else if (range === '6M') startIndex = Math.max(0, len - 130);
-        else if (range === '1Y') startIndex = Math.max(0, len - 252);
-        else if (range === '3Y') startIndex = Math.max(0, len - 756);
-        else if (range === 'ALL') startIndex = 0;
+        let count = total;
+        if (range === '3M') count = Math.min(65, total);
+        else if (range === '6M') count = Math.min(130, total);
+        else if (range === '1Y') count = Math.min(252, total);
+        else if (range === '3Y') count = Math.min(756, total);
+        else if (range === 'ALL') count = total;
 
-        chartInstance.options.scales.x.min = dates[startIndex];
-        chartInstance.options.scales.x.max = dates[len - 1];
+        const minIdx = total - count;
+        const maxIdx = total - 1;
+
+        chartInstance.resetZoom();
+        chartInstance.options.scales.x.min = chartInstance.data.labels[minIdx];
+        chartInstance.options.scales.x.max = chartInstance.data.labels[maxIdx];
         chartInstance.update();
 
         document.querySelectorAll('.zoom-btn').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
+        if (event && event.target) event.target.classList.add('active');
     }}
 
     function resetChartZoom() {{
@@ -1180,47 +1347,50 @@ def render_unified_html(stock_data_map):
             return;
         }}
 
-        Object.keys(timeline).forEach(dateLabel => {{
-            const articles = timeline[dateLabel];
-            if (!articles || articles.length === 0) return;
-
-            const dayDiv = document.createElement("div");
-            dayDiv.className = "day-group";
+        Object.keys(timeline).forEach(day => {{
+            const items = timeline[day];
+            const dayBox = document.createElement("div");
+            dayBox.className = "day-group";
 
             let itemsHtml = "";
-            articles.forEach(art => {{
-                const timeSpan = art.time ? `<span class="news-time">${{art.time}}</span>` : "";
+            items.forEach(n => {{
                 itemsHtml += `
                     <div class="news-item">
-                        ${{timeSpan}}
-                        <a href="${{art.link}}" target="_blank" class="news-link">${{art.title}}</a>
+                        <span class="news-time">${{n.time || ""}}</span>
+                        <a class="news-link" href="${{n.link}}" target="_blank" rel="noopener noreferrer">${{n.title}}</a>
                     </div>
                 `;
             }});
 
-            dayDiv.innerHTML = `
-                <div class="day-label">📅 ${{dateLabel}}</div>
-                <div class="day-news-list">${{itemsHtml}}</div>
+            dayBox.innerHTML = `
+                <div class="day-label">
+                    <span>📅</span> ${{day}}
+                </div>
+                ${{itemsHtml}}
             `;
-            container.appendChild(dayDiv);
+            container.appendChild(dayBox);
         }});
     }}
 
+    // 초기 실행
     updateCounts();
     renderSidebar();
-    updateMainDetail();
+    selectStock("NVDA");
 </script>
 </body>
 </html>
 """
+
     with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
         f.write(html)
     with open(OUTPUT_INDEX_HTML, "w", encoding="utf-8") as f:
         f.write(html)
 
     print(f"\n==========================================")
-    print(f"✅ 통합 대시보드 파일 생성 완료: {OUTPUT_HTML}")
-    print(f"==========================================\n")
+    print(f"✅ Method A 대시보드 경량 HTML 생성 완료:")
+    print(f" - {OUTPUT_HTML} ({round(os.path.getsize(OUTPUT_HTML)/1024, 1)} KB)")
+    print(f" - {OUTPUT_INDEX_HTML} ({round(os.path.getsize(OUTPUT_INDEX_HTML)/1024, 1)} KB)")
+    print(f"==========================================")
 
 if __name__ == "__main__":
     build_unified_system()
