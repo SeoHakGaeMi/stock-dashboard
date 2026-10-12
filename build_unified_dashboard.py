@@ -1125,7 +1125,7 @@ def render_unified_html(summary_list):
         const periodName = activePeriod === 'p10' ? "10년" : "20년";
 
         if (activeChartType === "MDD") {{
-            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] MDD 낙폭 차트 (마우스 휠/드래그 확대 지원)`;
+            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] MDD 낙폭 차트 (상단 기간 버튼 / 드래그 이동 지원)`;
             legendBox.innerHTML = `
                 <div class="legend-item"><div class="line-swatch" style="background:#EF4444;"></div> 낙폭 곡선</div>
                 <div class="legend-item"><div class="line-swatch" style="background:#F59E0B;"></div> 평균 MDD (${{p.avg_mdd}}%)</div>
@@ -1193,7 +1193,7 @@ def render_unified_html(summary_list):
                         zoom: {{
                             pan: {{ enabled: true, mode: 'x' }},
                             zoom: {{
-                                wheel: {{ enabled: true }},
+                                wheel: {{ enabled: false }},
                                 pinch: {{ enabled: true }},
                                 mode: 'x'
                             }}
@@ -1217,7 +1217,7 @@ def render_unified_html(summary_list):
             }});
         }} else {{
             const curSym = stock.currency;
-            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] 주가 및 주요 이동평균선 (마우스 휠/드래그 확대 지원)`;
+            document.getElementById("chartTitle").innerText = `${{stock.name}} [${{periodName}}] 주가 및 주요 이동평균선 (상단 기간 버튼 / 드래그 이동 지원)`;
             legendBox.innerHTML = `
                 <div class="legend-item"><div class="line-swatch" style="background:#38BDF8;"></div> 종가 (${{curSym}})</div>
                 <div class="legend-item"><div class="line-swatch" style="background:#22C55E;"></div> 20일선</div>
@@ -1291,7 +1291,7 @@ def render_unified_html(summary_list):
                         zoom: {{
                             pan: {{ enabled: true, mode: 'x' }},
                             zoom: {{
-                                wheel: {{ enabled: true }},
+                                wheel: {{ enabled: false }},
                                 pinch: {{ enabled: true }},
                                 mode: 'x'
                             }}
