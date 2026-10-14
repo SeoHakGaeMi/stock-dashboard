@@ -747,53 +747,40 @@ def render_unified_html(summary_list, full_data=None):
         .stat-val {{ font-size: 22px; font-weight: 800; margin-top: 4px; }}
         .stat-desc {{ font-size: 11px; color: var(--text-muted); margin-top: 4px; }}
 
-        /* 토스 AI 시장 브리핑 카드 */
+        /* 실시간 시장 브리핑 카드 */
         .ai-briefing-card {{
             background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95));
-            border: 1px solid rgba(56, 189, 248, 0.35);
+            border: 1px solid rgba(56, 189, 248, 0.3);
             border-radius: 12px;
             padding: 16px 20px;
             margin-bottom: 20px;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
         }}
-        .ai-briefing-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }}
-        .ai-spark-badge {{
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 13px;
-            font-weight: 800;
-            color: #38BDF8;
-            background: rgba(56, 189, 248, 0.12);
-            padding: 4px 10px;
-            border-radius: 6px;
-            border: 1px solid rgba(56, 189, 248, 0.25);
-        }}
-        .ai-time-label {{
-            font-size: 11px;
-            color: var(--text-muted);
-            font-weight: 600;
-        }}
         .ai-briefing-body {{
-            font-size: 13px;
-            line-height: 1.65;
+            font-size: 13.5px;
+            line-height: 1.7;
             color: #E2E8F0;
         }}
         .ai-hl {{ color: #38BDF8; font-weight: 700; }}
         .ai-hl-up {{ color: #22C55E; font-weight: 700; }}
         .ai-hl-down {{ color: #EF4444; font-weight: 700; }}
-        .ai-news-tag {{
+        .ai-news-link {{
+            display: inline-block;
             background: rgba(255, 255, 255, 0.08);
             color: #F8FAFC;
-            padding: 2px 6px;
-            border-radius: 4px;
+            padding: 2px 7px;
+            border-radius: 5px;
             font-weight: 600;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            text-decoration: none;
+            transition: all 0.15s;
+            margin: 0 2px;
+        }}
+        .ai-news-link:hover {{
+            background: rgba(56, 189, 248, 0.2);
+            border-color: #38BDF8;
+            color: #38BDF8;
+            text-decoration: underline;
         }}
 
         /* 차트 박스 */
@@ -999,12 +986,8 @@ def render_unified_html(summary_list, full_data=None):
         </div>
     </div>
 
-    <!-- 토스증권 AI 스타일 실시간 시장 브리핑 카드 -->
+    <!-- 실시간 시장 브리핑 카드 -->
     <div class="ai-briefing-card" id="aiBriefingCard">
-        <div class="ai-briefing-header">
-            <span class="ai-spark-badge">✨ 토스 AI 시장 & 뉴스 브리핑</span>
-            <span class="ai-time-label" id="aiBriefingTime">실시간 진단</span>
-        </div>
         <div class="ai-briefing-body" id="aiBriefingText">
             데이터를 분석하고 있습니다...
         </div>
@@ -1366,15 +1349,16 @@ def render_unified_html(summary_list, full_data=None):
         const dirWord = chg > 0 ? "상승" : (chg < 0 ? "하락" : "보합");
         const chgClass = chg > 0 ? "ai-hl-up" : (chg < 0 ? "ai-hl-down" : "ai-hl");
 
-        // 최근 1~2일 뉴스 헤드라인 추출
+        // 최근 1~2일 뉴스 헤드라인 및 링크 추출
         const timeline = stock.news_timeline;
-        let headlines = [];
+        let articles = [];
         if (Array.isArray(timeline)) {{
             for (const group of timeline.slice(0, 2)) {{
                 for (const it of (group.items || []).slice(0, 3)) {{
-                    const cleanTitle = (it.title || '').split(' - ')[0].strip ? (it.title || '').split(' - ')[0].trim() : (it.title || '').split(' - ')[0];
-                    if (cleanTitle && !headlines.includes(cleanTitle)) {{
-                        headlines.push(cleanTitle);
+                    const rawTitle = it.title || '';
+                    const cleanTitle = rawTitle.includes(' - ') ? rawTitle.split(' - ')[0].trim() : rawTitle.trim();
+                    if (cleanTitle && !articles.some(a => a.title === cleanTitle)) {{
+                        articles.push({{ title: cleanTitle, link: it.link || '#' }});
                     }}
                 }}
             }}
@@ -1382,18 +1366,21 @@ def render_unified_html(summary_list, full_data=None):
             const days = Object.keys(timeline).slice(0, 2);
             for (const d of days) {{
                 for (const it of (timeline[d] || []).slice(0, 3)) {{
-                    const cleanTitle = (it.title || '').split(' - ')[0].trim();
-                    if (cleanTitle && !headlines.includes(cleanTitle)) {{
-                        headlines.push(cleanTitle);
+                    const rawTitle = it.title || '';
+                    const cleanTitle = rawTitle.includes(' - ') ? rawTitle.split(' - ')[0].trim() : rawTitle.trim();
+                    if (cleanTitle && !articles.some(a => a.title === cleanTitle)) {{
+                        articles.push({{ title: cleanTitle, link: it.link || '#' }});
                     }}
                 }}
             }}
         }}
 
         let newsText = "";
-        if (headlines.length > 0) {{
-            const quoted = headlines.slice(0, 2).map(h => `<span class="ai-news-tag">"${{h}}"</span>`).join(" 및 ");
-            newsText = `최근 시장에서는 ${{quoted}} 등의 주요 소식이 전해진 가운데,`;
+        if (articles.length > 0) {{
+            const linkedArticles = articles.slice(0, 2).map(a => 
+                `<a href="${{a.link}}" target="_blank" rel="noopener noreferrer" class="ai-news-link">"${{a.title}}" ↗</a>`
+            ).join(" 및 ");
+            newsText = `최근 시장에서는 ${{linkedArticles}} 등의 주요 소식이 전해진 가운데,`;
         }} else {{
             newsText = `최근 대형 돌발 악재 없이 거시 시장 수급의 영향을 받는 가운데,`;
         }}
