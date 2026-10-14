@@ -369,6 +369,11 @@ def build_unified_system():
         with open(stock_path, "w", encoding="utf-8") as sf:
             json.dump(d, sf, ensure_ascii=False)
 
+        # 로컬 file:// 환경에서 브라우저 CORS 차단 없이 완벽 연동되도록 JS 파일도 함께 생성
+        stock_js_path = os.path.join(stocks_dir, f"{sym}.js")
+        with open(stock_js_path, "w", encoding="utf-8") as sjf:
+            sjf.write(f"window.__stockData_{sym} = {json.dumps(d, ensure_ascii=False)};")
+
         p10 = d.get("p10", {})
         p20 = d.get("p20", {})
         r10 = round(abs(p10.get("current_dd", 0)) / abs(p10.get("avg_mdd", 1)) * 100, 1) if p10.get("avg_mdd") else 0
@@ -1055,22 +1060,55 @@ def render_unified_html(summary_list):
 
         document.getElementById("chartTitle").innerText = `⏳ ${{s.name || sym}} 상세 차트 로딩 중...`;
 
-        // Method A: 개별 종목 JSON을 비동기로 로드
-        fetch(`./data/stocks/${{sym}}.json`)
-            .then(res => {{
-                if (!res.ok) throw new Error("데이터를 불러오지 못했습니다 (HTTP " + res.status + ")");
-                return res.json();
-            }})
-            .then(data => {{
-                stockCache[sym] = data;
-                if (activeSym === sym) {{
-                    renderDetail(data);
+        // 1. 이미 전역 스크립트로 로드되었거나 캐시된 경우 즉시 렌더링
+        if (window["__stockData_" + sym]) {{
+            stockCache[sym] = window["__stockData_" + sym];
+        }}
+        if (stockCache[sym]) {{
+            if (activeSym === sym) renderDetail(stockCache[sym]);
+            return;
+        }}
+
+        // 2. 실행 환경 확인 (로컬 file:// vs 웹 http/https) 및 reports 경로 보정
+        const isFileProto = window.location.protocol === 'file:';
+        const inReports = window.location.pathname.includes('/reports/');
+        const basePath = inReports ? '../data/stocks/' : './data/stocks/';
+
+        if (isFileProto) {{
+            // 로컬 파일 실행: 브라우저 CORS 제약 없는 동적 script 태그 로드
+            const script = document.createElement('script');
+            script.src = `${{basePath}}${{sym}}.js`;
+            script.onload = () => {{
+                if (window["__stockData_" + sym]) {{
+                    stockCache[sym] = window["__stockData_" + sym];
+                    if (activeSym === sym) {{
+                        renderDetail(stockCache[sym]);
+                    }}
                 }}
-            }})
-            .catch(err => {{
-                console.error("상세 데이터 로드 실패:", err);
+            }};
+            script.onerror = () => {{
+                console.error("로컬 스크립트 로드 실패:", sym);
                 document.getElementById("chartTitle").innerText = `⚠️ ${{s.name || sym}} 차트 데이터를 불러올 수 없습니다.`;
-            }});
+            }};
+            document.head.appendChild(script);
+        }} else {{
+            // 웹 환경 (GitHub Pages 등): 개별 종목 JSON 비동기 fetch
+            fetch(`${{basePath}}${{sym}}.json`)
+                .then(res => {{
+                    if (!res.ok) throw new Error("데이터를 불러오지 못했습니다 (HTTP " + res.status + ")");
+                    return res.json();
+                }})
+                .then(data => {{
+                    stockCache[sym] = data;
+                    if (activeSym === sym) {{
+                        renderDetail(data);
+                    }}
+                }})
+                .catch(err => {{
+                    console.error("상세 데이터 로드 실패:", err);
+                    document.getElementById("chartTitle").innerText = `⚠️ ${{s.name || sym}} 차트 데이터를 불러올 수 없습니다.`;
+                }});
+        }}
     }}
 
     function renderDetail(stock) {{
