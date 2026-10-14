@@ -48,7 +48,6 @@ SP100_COMPANIES = [
     {"sym": "SCHW", "name": "찰스 슈왑", "sector": "금융"},
     {"sym": "PGR", "name": "프로그레시브", "sector": "금융"},
     {"sym": "CB", "name": "처브", "sector": "금융"},
-    {"sym": "MMC", "name": "마시앤맥레넌", "sector": "금융"},
     {"sym": "CME", "name": "CME 그룹", "sector": "금융"},
 
     # 헬스케어 & 제약/바이오

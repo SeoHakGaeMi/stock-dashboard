@@ -409,11 +409,26 @@ def build_unified_system():
     print(f"\n✓ Method A: {len(stock_data_map)}개 종목 분할 JSON 생성 완료 (저장 경로: data/stocks/)")
     print(f"✓ 경량 요약본 생성 완료: {summary_path} ({round(os.path.getsize(summary_path)/1024, 1)} KB)")
 
-    render_unified_html(summary_list)
+    # 1. 로컬 실행용 완전 독립 대시보드 (reports/unified_market_dashboard.html): 데이터 전체 인메모리 임베딩으로 CORS/오프라인 무결점
+    local_html = render_unified_html(summary_list, full_data=stock_data_map)
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(local_html)
 
-def render_unified_html(summary_list):
+    # 2. GitHub Pages 배포용 초경량 대시보드 (index.html): Method A 온디맨드 fetch()
+    web_html = render_unified_html(summary_list, full_data=None)
+    with open(OUTPUT_INDEX_HTML, "w", encoding="utf-8") as f:
+        f.write(web_html)
+
+    print(f"\n==========================================")
+    print(f"✅ 대시보드 생성 완료:")
+    print(f" - [로컬 실행용] {OUTPUT_HTML} ({round(os.path.getsize(OUTPUT_HTML)/1024, 1)} KB)")
+    print(f" - [웹 배포용]   {OUTPUT_INDEX_HTML} ({round(os.path.getsize(OUTPUT_INDEX_HTML)/1024, 1)} KB)")
+    print(f"==========================================")
+
+def render_unified_html(summary_list, full_data=None):
     cat_b64 = get_cat_base64()
     summary_json_str = json.dumps(summary_list, ensure_ascii=False)
+    full_data_json_str = json.dumps(full_data, ensure_ascii=False) if full_data else "null"
 
     html = f"""<!DOCTYPE html>
 <html lang="ko">
@@ -887,6 +902,9 @@ def render_unified_html(summary_list):
 </div>
 
 <script>
+    // 로컬 독립 모드 데이터 (full_data 전달 시 100% 인메모리 탑재로 즉시 연동)
+    const fullStockData = {full_data_json_str};
+
     // Method A: 초경량 요약본 인메모리 탑재 (초기 로딩 0.05초)
     const summaryList = {summary_json_str};
     const summaryMap = {{}};
@@ -1016,6 +1034,12 @@ def render_unified_html(summary_list):
     }}
 
     function loadAndRenderDetail(sym) {{
+        if (typeof fullStockData !== 'undefined' && fullStockData && fullStockData[sym]) {{
+            stockCache[sym] = fullStockData[sym];
+            renderDetail(fullStockData[sym]);
+            return;
+        }}
+
         if (stockCache[sym]) {{
             renderDetail(stockCache[sym]);
             return;
@@ -1433,16 +1457,7 @@ def render_unified_html(summary_list):
 </html>
 """
 
-    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
-        f.write(html)
-    with open(OUTPUT_INDEX_HTML, "w", encoding="utf-8") as f:
-        f.write(html)
-
-    print(f"\n==========================================")
-    print(f"✅ Method A 대시보드 경량 HTML 생성 완료:")
-    print(f" - {OUTPUT_HTML} ({round(os.path.getsize(OUTPUT_HTML)/1024, 1)} KB)")
-    print(f" - {OUTPUT_INDEX_HTML} ({round(os.path.getsize(OUTPUT_INDEX_HTML)/1024, 1)} KB)")
-    print(f"==========================================")
+    return html
 
 if __name__ == "__main__":
     build_unified_system()
