@@ -187,6 +187,9 @@ def compute_profile(daily_records, min_drop=-10.0, step=1):
     current_dd = drawdowns[-1]
     current_price = daily_records[-1]["close"]
 
+    prev_price = daily_records[-2]["close"] if len(daily_records) >= 2 else current_price
+    daily_change = round(((current_price - prev_price) / prev_price) * 100, 2) if prev_price > 0 else 0.0
+
     ma20 = calculate_sma(closes, 20)
     ma50 = calculate_sma(closes, 50)
     ma100 = calculate_sma(closes, 100)
@@ -194,6 +197,8 @@ def compute_profile(daily_records, min_drop=-10.0, step=1):
 
     return {
         "current_price": round(current_price, 2),
+        "prev_price": round(prev_price, 2),
+        "daily_change": daily_change,
         "ath_price": round(ath, 2),
         "ath_date": ath_date,
         "current_dd": current_dd,
@@ -406,6 +411,7 @@ def build_unified_system():
         p20 = d.get("p20", {})
         r10 = round(abs(p10.get("current_dd", 0)) / abs(p10.get("avg_mdd", 1)) * 100, 1) if p10.get("avg_mdd") else 0
         r20 = round(abs(p20.get("current_dd", 0)) / abs(p20.get("avg_mdd", 1)) * 100, 1) if p20.get("avg_mdd") else 0
+        daily_chg = p10.get("daily_change", 0.0)
 
         summary_item = {
             "sym": sym,
@@ -413,8 +419,10 @@ def build_unified_system():
             "sector": d.get("sector", ""),
             "is_kr": d.get("is_kr", False),
             "currency": d.get("currency", "$"),
+            "daily_change": daily_chg,
             "p10": {
                 "current_price": p10.get("current_price", 0),
+                "daily_change": daily_chg,
                 "current_dd": p10.get("current_dd", 0),
                 "avg_mdd": p10.get("avg_mdd", 0),
                 "worst_mdd": p10.get("worst_mdd", 0),
@@ -422,6 +430,7 @@ def build_unified_system():
             },
             "p20": {
                 "current_price": p20.get("current_price", 0),
+                "daily_change": daily_chg,
                 "current_dd": p20.get("current_dd", 0),
                 "avg_mdd": p20.get("avg_mdd", 0),
                 "worst_mdd": p20.get("worst_mdd", 0),
@@ -535,10 +544,47 @@ def render_unified_html(summary_list, full_data=None):
         }}
         .search-input:focus {{ border-color: var(--blue); }}
 
+        /* 정렬 바 */
+        .sort-bar {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+            flex-shrink: 0;
+            background: rgba(15, 23, 42, 0.45);
+        }}
+        .sort-label {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            white-space: nowrap;
+            margin-right: 2px;
+        }}
+        .sort-btn {{
+            background: var(--bg-item);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }}
+        .sort-btn:hover {{ border-color: var(--blue); color: #FFF; }}
+        .sort-btn.active {{
+            background: rgba(56, 189, 248, 0.15);
+            border-color: var(--blue);
+            color: var(--blue);
+        }}
+
         .filter-chips {{
             display: flex;
             gap: 6px;
-            padding: 10px 14px;
+            padding: 8px 14px;
             border-bottom: 1px solid var(--border);
             overflow-x: auto;
             flex-shrink: 0;
@@ -701,6 +747,55 @@ def render_unified_html(summary_list, full_data=None):
         .stat-val {{ font-size: 22px; font-weight: 800; margin-top: 4px; }}
         .stat-desc {{ font-size: 11px; color: var(--text-muted); margin-top: 4px; }}
 
+        /* 토스 AI 시장 브리핑 카드 */
+        .ai-briefing-card {{
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.95));
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        }}
+        .ai-briefing-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }}
+        .ai-spark-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #38BDF8;
+            background: rgba(56, 189, 248, 0.12);
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(56, 189, 248, 0.25);
+        }}
+        .ai-time-label {{
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 600;
+        }}
+        .ai-briefing-body {{
+            font-size: 13px;
+            line-height: 1.65;
+            color: #E2E8F0;
+        }}
+        .ai-hl {{ color: #38BDF8; font-weight: 700; }}
+        .ai-hl-up {{ color: #22C55E; font-weight: 700; }}
+        .ai-hl-down {{ color: #EF4444; font-weight: 700; }}
+        .ai-news-tag {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #F8FAFC;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }}
+
         /* 차트 박스 */
         .chart-box {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; position: relative; }}
         .chart-canvas-wrapper {{
@@ -829,6 +924,15 @@ def render_unified_html(summary_list, full_data=None):
             <input type="text" id="searchInput" class="search-input" placeholder="티커 또는 기업명 검색 (예: NVDA, 삼성전자)..." oninput="filterStocks()">
         </div>
     </div>
+    <!-- 정렬 모드 선택 바 -->
+    <div class="sort-bar">
+        <span class="sort-label">정렬:</span>
+        <button class="sort-btn active" id="sortRatio" onclick="setSortMode('RATIO')">🚨 평균 MDD 도달순</button>
+        <button class="sort-btn" id="sortDailyFall" onclick="setSortMode('DAILY_FALL')">📉 전일 하락순</button>
+        <button class="sort-btn" id="sortDailyRise" onclick="setSortMode('DAILY_RISE')">📈 전일 상승순</button>
+        <button class="sort-btn" id="sortDD" onclick="setSortMode('DD')">고점 낙폭순</button>
+    </div>
+    <!-- 상태 필터 칩 -->
     <div class="filter-chips">
         <button class="chip-btn active" onclick="setFilter('ALL')">전체 (<span id="cntAll">0</span>)</button>
         <button class="chip-btn" onclick="setFilter('BOTTOM')">🚨 바닥권 (<span id="cntBottom">0</span>)</button>
@@ -892,6 +996,17 @@ def render_unified_html(summary_list, full_data=None):
             <div class="stat-label">평균 바닥 도달률</div>
             <div class="stat-val" id="statRatio">-</div>
             <div class="stat-desc" id="statStatus">상태 진단</div>
+        </div>
+    </div>
+
+    <!-- 토스증권 AI 스타일 실시간 시장 브리핑 카드 -->
+    <div class="ai-briefing-card" id="aiBriefingCard">
+        <div class="ai-briefing-header">
+            <span class="ai-spark-badge">✨ 토스 AI 시장 & 뉴스 브리핑</span>
+            <span class="ai-time-label" id="aiBriefingTime">실시간 진단</span>
+        </div>
+        <div class="ai-briefing-body" id="aiBriefingText">
+            데이터를 분석하고 있습니다...
         </div>
     </div>
 
@@ -974,15 +1089,43 @@ def render_unified_html(summary_list, full_data=None):
         document.getElementById("totalBadge").innerText = all + "개 종목";
     }}
 
+    let currentSortMode = 'RATIO';
+
+    function setSortMode(mode) {{
+        currentSortMode = mode;
+        const btns = document.querySelectorAll(".sort-btn");
+        btns.forEach(b => b.classList.remove("active"));
+        if (mode === 'RATIO') document.getElementById("sortRatio").classList.add("active");
+        else if (mode === 'DAILY_FALL') document.getElementById("sortDailyFall").classList.add("active");
+        else if (mode === 'DAILY_RISE') document.getElementById("sortDailyRise").classList.add("active");
+        else if (mode === 'DD') document.getElementById("sortDD").classList.add("active");
+        renderSidebar();
+    }}
+
     function renderSidebar() {{
         const listEl = document.getElementById("stockList");
         listEl.innerHTML = "";
         const query = document.getElementById("searchInput").value.trim().toLowerCase();
 
         const sortedList = [...summaryList].sort((a, b) => {{
-            const pA = a[activePeriod] || {{ ratio: 0 }};
-            const pB = b[activePeriod] || {{ ratio: 0 }};
-            return pB.ratio - pA.ratio;
+            const pA = a[activePeriod] || {{ ratio: 0, current_dd: 0, daily_change: 0 }};
+            const pB = b[activePeriod] || {{ ratio: 0, current_dd: 0, daily_change: 0 }};
+            const chgA = typeof a.daily_change !== 'undefined' ? a.daily_change : (pA.daily_change || 0);
+            const chgB = typeof b.daily_change !== 'undefined' ? b.daily_change : (pB.daily_change || 0);
+
+            if (currentSortMode === 'DAILY_FALL') {{
+                // 전일 많이 빠진 순서 (가장 큰 음수부터: -5% -> -3% -> 0% -> +2%)
+                return chgA - chgB;
+            }} else if (currentSortMode === 'DAILY_RISE') {{
+                // 전일 많이 오른 순서 (+5% -> +3% -> 0% -> -2%)
+                return chgB - chgA;
+            }} else if (currentSortMode === 'DD') {{
+                // 고점 대비 낙폭 큰 순서 (-78% -> -50% -> -10%)
+                return pA.current_dd - pB.current_dd;
+            }} else {{
+                // 기본값: 평균 MDD 도달률 순서
+                return pB.ratio - pA.ratio;
+            }}
         }});
 
         sortedList.forEach(item => {{
@@ -1002,6 +1145,11 @@ def render_unified_html(summary_list, full_data=None):
             const barWidth = Math.min(ratio, 100);
             const barColor = ratio >= 90 ? "#22C55E" : (ratio >= 60 ? "#F59E0B" : "#38BDF8");
 
+            const chg = typeof item.daily_change !== 'undefined' ? item.daily_change : (p.daily_change || 0);
+            const chgSign = chg > 0 ? "+" : "";
+            const chgColor = chg > 0 ? "#22C55E" : (chg < 0 ? "#EF4444" : "#94A3B8");
+            const chgBg = chg > 0 ? "rgba(34, 197, 94, 0.15)" : (chg < 0 ? "rgba(239, 68, 68, 0.15)" : "rgba(148, 163, 184, 0.1)");
+
             div.innerHTML = `
                 <div class="item-left">
                     ${{renderLogo(sym, item.is_kr, false)}}
@@ -1011,7 +1159,10 @@ def render_unified_html(summary_list, full_data=None):
                     </div>
                 </div>
                 <div class="item-right">
-                    <span class="badge-dd">${{p.current_dd}}%</span>
+                    <div style="display:flex; gap:4px; align-items:center;">
+                        <span style="background:${{chgBg}}; color:${{chgColor}}; font-size:10px; font-weight:700; padding:2px 5px; border-radius:4px; white-space:nowrap;">전일 ${{chgSign}}${{chg.toFixed(2)}}%</span>
+                        <span class="badge-dd">${{p.current_dd}}%</span>
+                    </div>
                     <div class="ratio-bar-wrap">
                         <div class="ratio-bar" style="width: ${{barWidth}}%; background: ${{barColor}};"></div>
                     </div>
@@ -1205,6 +1356,64 @@ def render_unified_html(summary_list, full_data=None):
 
         renderChart(stock, p);
         renderNewsTimeline(stock);
+        updateAIBriefing(stock, p);
+    }}
+
+    function updateAIBriefing(stock, p) {{
+        const curSym = stock.currency || "$";
+        const chg = typeof p.daily_change !== 'undefined' ? p.daily_change : (stock.daily_change || 0);
+        const chgSign = chg > 0 ? "+" : "";
+        const dirWord = chg > 0 ? "상승" : (chg < 0 ? "하락" : "보합");
+        const chgClass = chg > 0 ? "ai-hl-up" : (chg < 0 ? "ai-hl-down" : "ai-hl");
+
+        // 최근 1~2일 뉴스 헤드라인 추출
+        const timeline = stock.news_timeline;
+        let headlines = [];
+        if (Array.isArray(timeline)) {{
+            for (const group of timeline.slice(0, 2)) {{
+                for (const it of (group.items || []).slice(0, 3)) {{
+                    const cleanTitle = (it.title || '').split(' - ')[0].strip ? (it.title || '').split(' - ')[0].trim() : (it.title || '').split(' - ')[0];
+                    if (cleanTitle && !headlines.includes(cleanTitle)) {{
+                        headlines.push(cleanTitle);
+                    }}
+                }}
+            }}
+        }} else if (typeof timeline === 'object' && timeline) {{
+            const days = Object.keys(timeline).slice(0, 2);
+            for (const d of days) {{
+                for (const it of (timeline[d] || []).slice(0, 3)) {{
+                    const cleanTitle = (it.title || '').split(' - ')[0].trim();
+                    if (cleanTitle && !headlines.includes(cleanTitle)) {{
+                        headlines.push(cleanTitle);
+                    }}
+                }}
+            }}
+        }}
+
+        let newsText = "";
+        if (headlines.length > 0) {{
+            const quoted = headlines.slice(0, 2).map(h => `<span class="ai-news-tag">"${{h}}"</span>`).join(" 및 ");
+            newsText = `최근 시장에서는 ${{quoted}} 등의 주요 소식이 전해진 가운데,`;
+        }} else {{
+            newsText = `최근 대형 돌발 악재 없이 거시 시장 수급의 영향을 받는 가운데,`;
+        }}
+
+        const ratio = (Math.abs(p.current_dd) / Math.abs(p.avg_mdd)) * 100;
+        let positionText = "";
+        if (ratio >= 90) {{
+            positionText = `현재 고점 대비 낙폭(<span class="ai-hl">${{p.current_dd}}%</span>)은 과거 주요 하락 사이클 평균 바닥선(<span class="ai-hl">${{p.avg_mdd}}%</span>)의 <strong>${{ratio.toFixed(1)}}%</strong>에 도달하여, 통계적으로 <span class="ai-hl-down">역사적 최저 바닥권(분할 매수 관심 구간)</span>에 진입해 있습니다.`;
+        }} else if (ratio >= 60) {{
+            positionText = `현재 낙폭(<span class="ai-hl">${{p.current_dd}}%</span>)은 과거 평균 조정폭의 <strong>${{ratio.toFixed(1)}}%</strong> 수준으로, 중기 가격 조정이 진행되고 있습니다.`;
+        }} else {{
+            positionText = `현재 낙폭은 <span class="ai-hl">${{p.current_dd}}%</span>로 과거 평균 조정선 대비 양호한 주가 궤도를 유지하고 있습니다.`;
+        }}
+
+        const el = document.getElementById("aiBriefingText");
+        el.innerHTML = `
+            <strong>${{stock.name}} (${{activeSym}})</strong>은(는) 전일 정규장 기준 <span class="${{chgClass}}">${{chgSign}}${{chg.toFixed(2)}}% ${{dirWord}}</span> 마감했습니다. 
+            ${{newsText}} 
+            ${{positionText}}
+        `;
     }}
 
     function renderChart(stock, p) {{
