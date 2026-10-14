@@ -81,13 +81,14 @@ def load_or_fetch_prices(item: dict) -> list:
     yahoo_sym = item.get("yahoo_sym", sym.replace(".", "-"))
     cache_file = os.path.join(CACHE_DIR, f"{sym}.json")
 
-    # 1. 로컬 캐시 확인
+    # 1. 로컬 캐시 확인 (12시간 TTL 적용: 반나절 경과 시 최신 일봉 자동 수집)
+    cached_data = None
     if os.path.exists(cache_file):
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if len(data) >= 10:
-                    return data
+                cached_data = json.load(f)
+                if len(cached_data) >= 10 and (time.time() - os.path.getmtime(cache_file)) < (12 * 3600):
+                    return cached_data
         except Exception:
             pass
 
@@ -251,13 +252,15 @@ def fetch_rss_articles(query: str, hl: str = "ko", gl: str = "KR") -> dict:
     return news_map
 
 def fetch_weekly_news_by_date(stock_name: str, sym: str) -> dict:
-    """한국어 뉴스 우선 수집 후, 없으면 글로벌 영문 뉴스 자동 보완 (영구 로컬 캐싱 적용)"""
+    """한국어 뉴스 우선 수집 후, 없으면 글로벌 영문 뉴스 자동 보완 (4시간 TTL 자동 최신화)"""
     cache_path = os.path.join(NEWS_CACHE_DIR, f"{sym}.json")
+    cached = None
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-                if cached and len(cached) > 0:
+                # 캐시가 4시간 이내라면 최신으로 간주하고 반환
+                if cached and (time.time() - os.path.getmtime(cache_path)) < (4 * 3600):
                     return cached
         except Exception:
             pass
@@ -277,8 +280,10 @@ def fetch_weekly_news_by_date(stock_name: str, sym: str) -> dict:
                 json.dump(news_map, f, ensure_ascii=False)
         except Exception:
             pass
+        return news_map
 
-    return news_map
+    # 네트워크 요청 실패 시 이전 캐시라도 있으면 반환
+    return cached or {}
 
 def process_single_stock(item, d10_cutoff, d20_cutoff):
     sym = item["sym"]
