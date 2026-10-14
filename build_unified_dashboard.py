@@ -209,81 +209,104 @@ def compute_profile(daily_records, min_drop=-10.0, step=1):
         "ma200": ma200[::step],
     }
 
-def fetch_rss_articles(query: str, hl: str = "ko", gl: str = "KR") -> dict:
-    """구글 뉴스 RSS 호출 및 날짜별 파싱"""
+KST = datetime.timezone(datetime.timedelta(hours=9))
+NEWS_CACHE_TTL = 30 * 60  # 30분 만료 (분석기 실행 시점 기준 최신 기사 실시간 수집)
+
+def fetch_rss_articles(query: str, hl: str = "ko", gl: str = "KR") -> list:
+    """구글 뉴스 RSS 최신순 호출, KST 시간 변환 및 최신 날짜 역순 정렬 그룹화"""
     encoded = urllib.parse.quote(query)
     ceid = "KR:ko" if hl == "ko" else "US:en"
-    url = f"https://news.google.com/rss/search?q={encoded}&hl={hl}&gl={gl}&ceid={ceid}"
+    # when:7d 조건을 명시하여 최근 7일 내 실시간 기사 집중 수집
+    url = f"https://news.google.com/rss/search?q={encoded}+when:7d&hl={hl}&gl={gl}&ceid={ceid}"
     headers = {"User-Agent": "Mozilla/5.0"}
-    news_map = {}
-
+    
+    parsed_items = []
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=6)
         if res.status_code == 200:
             root = ET.fromstring(res.content)
-            for item in root.findall(".//item")[:8]:
+            for item in root.findall(".//item"):
                 title = item.findtext("title", "")
                 link = item.findtext("link", "")
                 pub_str = item.findtext("pubDate", "")
 
-                if title:
-                    date_label = "최근 소식"
-                    time_label = ""
-                    if pub_str:
-                        try:
-                            dt = email.utils.parsedate_to_datetime(pub_str)
-                            weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][dt.weekday()]
-                            date_label = f"{dt.month}월 {dt.day}일 ({weekday_kr})"
-                            time_label = dt.strftime("%H:%M")
-                        except Exception:
-                            pass
-
-                    if date_label not in news_map:
-                        news_map[date_label] = []
-
-                    news_map[date_label].append({
-                        "title": title,
-                        "link": link,
-                        "time": time_label
-                    })
+                if title and pub_str:
+                    # 스팸/도박성 광고 키워드 배제
+                    if any(bad in title for bad in ["바카라", "카지노", "포커", "토토", "릴게임", "사이트 용어", "보너스 이름"]):
+                        continue
+                    try:
+                        dt_utc = email.utils.parsedate_to_datetime(pub_str)
+                        dt_kst = dt_utc.astimezone(KST)
+                        weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][dt_kst.weekday()]
+                        parsed_items.append({
+                            "dt": dt_kst,
+                            "date_label": f"{dt_kst.month}월 {dt_kst.day}일 ({weekday_kr})",
+                            "time_label": dt_kst.strftime("%H:%M"),
+                            "title": title,
+                            "link": link
+                        })
+                    except Exception:
+                        pass
     except Exception:
         pass
 
-    return news_map
+    if not parsed_items:
+        return []
 
-def fetch_weekly_news_by_date(stock_name: str, sym: str) -> dict:
-    """한국어 뉴스 우선 수집 후, 없으면 글로벌 영문 뉴스 자동 보완 (4시간 TTL 자동 최신화)"""
+    # 1. 기사들을 발행 시간 내림차순(최신순)으로 정렬 (Newest First)
+    parsed_items.sort(key=lambda x: x["dt"], reverse=True)
+
+    # 2. 날짜별 그룹화 (최신 날짜가 최상단에 오는 단일 방향성 보장)
+    timeline_list = []
+    day_map = {}
+    for it in parsed_items[:18]:  # 상위 18개 최신 기사 선별
+        d_lbl = it["date_label"]
+        if d_lbl not in day_map:
+            day_map[d_lbl] = []
+            timeline_list.append({
+                "day": d_lbl,
+                "items": day_map[d_lbl]
+            })
+        day_map[d_lbl].append({
+            "title": it["title"],
+            "link": it["link"],
+            "time": it["time_label"]
+        })
+
+    return timeline_list
+
+def fetch_weekly_news_by_date(stock_name: str, sym: str) -> list:
+    """한국어 뉴스 우선 수집 후, 없으면 글로벌 영문 뉴스 자동 보완 (30분 TTL 실시간 갱신)"""
     cache_path = os.path.join(NEWS_CACHE_DIR, f"{sym}.json")
     cached = None
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-                # 캐시가 4시간 이내라면 최신으로 간주하고 반환
-                if cached and (time.time() - os.path.getmtime(cache_path)) < (4 * 3600):
+                # 캐시가 30분 이내라면 최신으로 간주하고 반환
+                if cached and (time.time() - os.path.getmtime(cache_path)) < NEWS_CACHE_TTL:
                     return cached
         except Exception:
             pass
 
     clean_name = stock_name.split("(")[0].strip()
-    query_kr = f"{clean_name} OR {sym} 주가 OR 실적 OR 전망"
-    news_map = fetch_rss_articles(query_kr, hl="ko", gl="KR")
+    query_kr = f'"{clean_name}" (주가 OR 실적 OR 전망 OR 공시 OR 투자) -바카라 -카지노 -포커'
+    timeline = fetch_rss_articles(query_kr, hl="ko", gl="KR")
 
-    # 한국어 기사가 없는 미국 비인기 종목은 글로벌 금융 영문 뉴스 자동 보완
-    if not news_map and not sym.isdigit():
-        query_en = f"{sym} stock OR earnings OR shares"
-        news_map = fetch_rss_articles(query_en, hl="en-US", gl="US")
+    # 한국어 기사가 부족한 경우 글로벌 금융 영문 뉴스 보완
+    if (not timeline or len(timeline) == 0) and not sym.isdigit():
+        query_en = f'"{sym}" (stock OR earnings OR shares OR revenue) -casino -poker'
+        timeline = fetch_rss_articles(query_en, hl="en-US", gl="US")
 
-    if news_map:
+    if timeline:
         try:
             with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(news_map, f, ensure_ascii=False)
+                json.dump(timeline, f, ensure_ascii=False)
         except Exception:
             pass
-        return news_map
+        return timeline
 
-    # 네트워크 요청 실패 시 이전 캐시라도 있으면 반환
-    return cached or {}
+    return cached or []
 
 def process_single_stock(item, d10_cutoff, d20_cutoff):
     sym = item["sym"]
@@ -1423,18 +1446,20 @@ def render_unified_html(summary_list, full_data=None):
         container.innerHTML = "";
 
         const timeline = stock.news_timeline;
-        if (!timeline || Object.keys(timeline).length === 0) {{
+        if (!timeline || (Array.isArray(timeline) && timeline.length === 0) || (typeof timeline === 'object' && Object.keys(timeline).length === 0)) {{
             container.innerHTML = "<div class='empty-news'>최근 일주일 동안 집계된 주요 뉴스가 없습니다.</div>";
             return;
         }}
 
-        Object.keys(timeline).forEach(day => {{
-            const items = timeline[day];
+        // 배열(최신순 단일 방향성) 및 객체 호환 처리
+        const dayList = Array.isArray(timeline) ? timeline : Object.keys(timeline).map(d => ({{ day: d, items: timeline[d] }}));
+
+        dayList.forEach(group => {{
             const dayBox = document.createElement("div");
             dayBox.className = "day-group";
 
             let itemsHtml = "";
-            items.forEach(n => {{
+            (group.items || []).forEach(n => {{
                 itemsHtml += `
                     <div class="news-item">
                         <span class="news-time">${{n.time || ""}}</span>
@@ -1445,7 +1470,7 @@ def render_unified_html(summary_list, full_data=None):
 
             dayBox.innerHTML = `
                 <div class="day-label">
-                    <span>📅</span> ${{day}}
+                    <span>📅</span> ${{group.day}}
                 </div>
                 ${{itemsHtml}}
             `;
